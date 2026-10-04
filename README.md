@@ -20,8 +20,6 @@ Replaces keyboard and mouse control names in GTA San Andreas help text with matc
 1. Copy `PCKeyIcons.SA.asi` to the game's `scripts` directory.
 2. Copy `game_assets/models/pcbtns.txd` to the game's `models` directory.
 
-Do not load this standalone plugin together with a build of `1991.SA.asi` that still contains the same `ButtonIcons` module. Both plugins patch the same game functions.
-
 ## Building
 
 Open `PCKeyIcons.sln` in Visual Studio 2022 and build `Release GTA-SA|Win32`, or run:
@@ -41,8 +39,8 @@ The standalone harness compiles the real icon implementation with stubbed game A
 & '.\bin\tests\ButtonIconsRegression.exe'
 ```
 
-Inline icon heights are controlled by `ButtonIcons::ICON_SIZE` (13 font units in-game) and `ButtonIcons::MENU_ICON_SIZE` (17 font units while the frontend menu is active) in `source/ButtonIcons.h`. Both sizes retain the native symbol's vertical center. Existing keyboard tokens retain their indices; Backspace is `~K81~` and right Shift is `~K82~`.
+Inline icon heights are controlled by `ButtonIcons::ICON_SIZE` (13 font units in-game) and `ButtonIcons::MENU_ICON_SIZE` (17 font units while the frontend menu is active) in `source/ButtonIcons.h`. Both sizes retain the native symbol's vertical center. Existing keyboard tokens retain their indices;
 
 ## Credits
 
-Extracted from the GTA 1991 `ButtonIcons` module. Silent is credited for GInput source-code and icon-drawing help in the original implementation.
+Silent for GInput source-code and icon-drawing help in the original implementation.
