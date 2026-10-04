@@ -4,7 +4,7 @@ Replaces keyboard and mouse control names in GTA San Andreas help text with matc
 
 ## Features
 
-- Icons for 83 keyboard keys (including Backspace and right Shift) and 7 mouse inputs
+- Icons for 83 keyboard keys and 7 mouse inputs
 - Vertically centered icons with compact in-game sizing and larger menu sizing, preserving texture proportions and matching drawing/wrapping widths
 - Automatic support for the player's configured keyboard and mouse bindings
 - Compatibility with `GInputSA.asi`
