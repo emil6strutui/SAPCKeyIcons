@@ -20,7 +20,7 @@ Replaces keyboard and mouse control names in GTA San Andreas help text with matc
 
 ### With Mod Loader
 
-With Mod Loader installed, extract `PCKeyIcons-ModLoader.zip` into the game directory. The resulting layout is:
+With Mod Loader installed, extract `PCKeyIcons.zip` into the game directory. The resulting layout is:
 
 ```text
 modloader/
@@ -71,7 +71,7 @@ After building Release, run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package.ps1
 ```
 
-This creates `bin/packages/PCKeyIcons-ModLoader.zip` from the local Release ASI and bundled TXD. It does not build the project or copy files into the game. Running it again replaces the generated archive. Use `-Configuration Debug` to package an already built Debug ASI as `PCKeyIcons-ModLoader-Debug.zip`.
+This creates `bin/packages/PCKeyIcons.zip` from the local Release ASI and bundled TXD. It does not build the project or copy files into the game. Running it again replaces the generated archive. Use `-Configuration Debug` to package an already built Debug ASI as `PCKeyIcons-ModLoader-Debug.zip`.
 
 ## Regression checks
 
