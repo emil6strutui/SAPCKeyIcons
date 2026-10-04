@@ -7,9 +7,11 @@
 #include <CSprite2d.h>
 #include <CTxdStore.h>
 #include <RenderWare.h>
+#include <extensions/Paths.h>
 
 #include <cstring>
 #include <cstdio>
+#include <string>
 
 using namespace plugin;
 
@@ -159,21 +161,35 @@ static void ExpandButtonSpriteArray() {
 // TEXTURE LOADING
 // ============================================================================
 
-static void LoadTextures() {
-    if (g_TexturesLoaded) return;
-    if (!g_SpriteArray) return;
+static void DeleteButtonTextures() {
+    for (int i = KEYBOARD_SPRITE_BASE; i < MOUSE_SPRITE_BASE + MOUSE_COUNT; i++) {
+        if (g_SpriteArray[i].m_pTexture) {
+            g_SpriteArray[i].Delete();
+        }
+    }
+}
 
-    g_TxdSlot = CTxdStore::AddTxdSlot("buttonicons");
-    if (g_TxdSlot == -1) return;
+static bool TryLoadTextures(const char* path) {
+    // The filename overload of LoadTxd retries forever when opening fails.
+    // Open once ourselves so a missing or unreadable candidate can fall back.
+    RwStream* stream = RwStreamOpen(rwSTREAMFILENAME, rwSTREAMREAD, path);
+    if (!stream) return false;
 
-    if (!CTxdStore::LoadTxd(g_TxdSlot, "models\\pcbtns.txd")) {
-        CTxdStore::RemoveTxdSlot(g_TxdSlot);
-        g_TxdSlot = -1;
-        return;
+    const int slot = CTxdStore::AddTxdSlot("buttonicons");
+    if (slot == -1) {
+        RwStreamClose(stream, nullptr);
+        return false;
     }
 
-    CTxdStore::AddRef(g_TxdSlot);
-    CTxdStore::SetCurrentTxd(g_TxdSlot);
+    const bool loaded = CTxdStore::LoadTxd(slot, stream);
+    RwStreamClose(stream, nullptr);
+    if (!loaded) {
+        CTxdStore::RemoveTxdSlot(slot);
+        return false;
+    }
+
+    CTxdStore::PushCurrentTxd();
+    CTxdStore::SetCurrentTxd(slot);
 
     for (int i = 0; i < KEYBOARD_COUNT; i++) {
         int idx = KEYBOARD_SPRITE_BASE + i;
@@ -185,41 +201,55 @@ static void LoadTextures() {
         g_SpriteArray[idx].SetTexture(const_cast<char*>(g_MouseSpriteNames[i]));
     }
 
+    bool complete = true;
     for (int i = KEYBOARD_SPRITE_BASE; i < MOUSE_SPRITE_BASE + MOUSE_COUNT; i++) {
         RwTexture* tex = g_SpriteArray[i].m_pTexture;
-        if (tex) {
-            RwRaster* raster = RwTextureGetRaster(tex);
-            if (raster) {
-                int width = RwRasterGetWidth(raster);
-                int height = RwRasterGetHeight(raster);
-                if (height > 0) {
-                    float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
-                    g_ExtendedSpriteWidths[i] = ICON_SIZE * aspectRatio;
-                }
-            }
+        RwRaster* raster = tex ? RwTextureGetRaster(tex) : nullptr;
+        if (!raster || RwRasterGetWidth(raster) <= 0 || RwRasterGetHeight(raster) <= 0) {
+            complete = false;
+            continue;
         }
+        const float aspectRatio = static_cast<float>(RwRasterGetWidth(raster)) /
+                                  static_cast<float>(RwRasterGetHeight(raster));
+        g_ExtendedSpriteWidths[i] = ICON_SIZE * aspectRatio;
     }
 
     CTxdStore::PopCurrentTxd();
+
+    // The stock pcbtns.txd lacks our icons. Reject incomplete dictionaries too,
+    // releasing bound textures before their owning dictionary is removed.
+    if (!complete) {
+        DeleteButtonTextures();
+        CTxdStore::RemoveTxdSlot(slot);
+        return false;
+    }
+
+    CTxdStore::AddRef(slot);
+    g_TxdSlot = slot;
     g_TexturesLoaded = true;
+    return true;
+}
+
+static void LoadTextures() {
+    if (g_TexturesLoaded || !g_SpriteArray) return;
+
+    // Resolve from the actual ASI location, not the process working directory.
+    // Copy SDK helper results because their returned buffers are static.
+    const std::string pluginPath = paths::GetPluginDirRelativePathA("models\\pcbtns.txd");
+    const std::string gamePath = paths::GetGameDirRelativePathA("models\\pcbtns.txd");
+    if (TryLoadTextures(pluginPath.c_str())) return;
+
+    // Preserve legacy game-root installs without retrying the same path twice.
+    if (_stricmp(pluginPath.c_str(), gamePath.c_str()) != 0) {
+        TryLoadTextures(gamePath.c_str());
+    }
 }
 
 static void UnloadTextures() {
     if (!g_TexturesLoaded) return;
     if (!g_SpriteArray) return;
 
-    for (int i = 0; i < KEYBOARD_COUNT; i++) {
-        CSprite2d& sprite = g_SpriteArray[KEYBOARD_SPRITE_BASE + i];
-        if (sprite.m_pTexture) {
-            sprite.Delete();
-        }
-    }
-    for (int i = 0; i < MOUSE_COUNT; i++) {
-        CSprite2d& sprite = g_SpriteArray[MOUSE_SPRITE_BASE + i];
-        if (sprite.m_pTexture) {
-            sprite.Delete();
-        }
-    }
+    DeleteButtonTextures();
 
     if (g_TxdSlot != -1) {
         CTxdStore::RemoveTxdSlot(g_TxdSlot);

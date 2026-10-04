@@ -210,6 +210,146 @@ void CheckDirectDrawing() {
     Check(Harness::drawnColor.r == 20 && Harness::drawnColor.g == 40 &&
           Harness::drawnColor.b == 60 && Harness::drawnColor.a == 80, "direct drawing retains color");
 }
+
+void ResetTextureCase(Harness::FileKind packaged, Harness::FileKind game) {
+    using namespace ButtonIcons;
+    UnloadTextures();
+    // Reset only after the preceding case has checked its cleanup; this keeps
+    // failures independent even if a broken loader left partial sprite state.
+    for (int i = KEYBOARD_SPRITE_BASE; i < MOUSE_SPRITE_BASE + MOUSE_COUNT; ++i)
+        g_SpriteArray[i].m_pTexture = nullptr;
+    g_TexturesLoaded = false;
+    g_TxdSlot = -1;
+    Harness::ResetTextureIo();
+    Harness::files[Harness::PluginTexturePath()] = packaged;
+    Harness::files[Harness::GameTexturePath()] = game;
+}
+
+void CheckTextureLoadResult(const std::string& label, const std::string& expectedPath) {
+    using namespace ButtonIcons;
+    const bool shouldLoad = !expectedPath.empty();
+    Check(g_TexturesLoaded == shouldLoad, label + " enables icons only with a complete dictionary");
+    Check(Harness::filenameLoadAttempts.empty(), label + " never enters the native filename retry loop");
+    Check(Harness::liveStreams == 0, label + " closes every opened stream");
+    Check(Harness::txdSlots.size() == (shouldLoad ? 1u : 0u), label + " retains only the successful dictionary slot");
+    Check(Harness::currentTxd == 77 && Harness::txdStack.empty() && Harness::stackUnderflows == 0,
+          label + " preserves the caller's current texture dictionary");
+    Check(Harness::prematureSlotRemovals == 0, label + " releases sprite references before removing dictionaries");
+    if (shouldLoad) {
+        const auto slot = Harness::txdSlots.find(g_TxdSlot);
+        Check(slot != Harness::txdSlots.end() && slot->second == expectedPath,
+              label + " chooses the expected package/game path");
+        Check(Harness::boundTextures == KEYBOARD_COUNT + MOUSE_COUNT,
+              label + " binds every required keyboard and mouse texture");
+    } else {
+        Check(g_TxdSlot == -1, label + " clears the failed dictionary handle");
+        Check(Harness::boundTextures == 0, label + " releases partially bound textures");
+        char token[] = "~K81~";
+        CRGBA color;
+        Check(ParseToken_Hooked(token, color, false, nullptr) == token + 3,
+              label + " keeps text fallback active when icons are unavailable");
+    }
+}
+
+void CheckTextureCleanup(const std::string& label) {
+    using namespace ButtonIcons;
+    UnloadTextures();
+    Check(!g_TexturesLoaded && g_TxdSlot == -1, label + " unloads icon state");
+    Check(Harness::txdSlots.empty() && Harness::liveStreams == 0 && Harness::boundTextures == 0,
+          label + " unloads all slots, streams, and texture references");
+    Check(Harness::prematureSlotRemovals == 0, label + " unloads sprites before their dictionary");
+}
+
+void CheckTextureLoading() {
+    using namespace ButtonIcons;
+    using Kind = Harness::FileKind;
+    struct Case { const char* name; Kind packaged; Kind game; int selected; };
+    const Case cases[] = {
+        {"packaged dictionary wins over vanilla game TXD", Kind::Complete, Kind::Vanilla, 1},
+        {"standalone package without game TXD", Kind::Complete, Kind::Missing, 1},
+        {"manual install fallback", Kind::Missing, Kind::Complete, 2},
+        {"both files missing", Kind::Missing, Kind::Missing, 0},
+        {"corrupt package fallback", Kind::Corrupt, Kind::Complete, 2},
+        {"unreadable package fallback", Kind::Unreadable, Kind::Complete, 2},
+        {"incomplete package fallback", Kind::Incomplete, Kind::Complete, 2},
+        {"invalid raster fallback", Kind::ZeroRaster, Kind::Complete, 2},
+        {"zero height raster fallback", Kind::ZeroHeight, Kind::Complete, 2},
+        {"missing raster fallback", Kind::NullRaster, Kind::Complete, 2},
+        {"vanilla dictionaries rejected", Kind::Vanilla, Kind::Vanilla, 0},
+        {"incomplete package without fallback", Kind::Incomplete, Kind::Missing, 0},
+        {"corrupt dictionaries rejected", Kind::Corrupt, Kind::Corrupt, 0}
+    };
+    for (const auto& test : cases) {
+        ResetTextureCase(test.packaged, test.game);
+        LoadTextures();
+        const std::string expected = test.selected == 1 ? Harness::PluginTexturePath() :
+            test.selected == 2 ? Harness::GameTexturePath() : "";
+        CheckTextureLoadResult(test.name, expected);
+        Check(Harness::addRefCalls == (test.selected ? 1 : 0),
+              std::string(test.name) + " references only a validated dictionary");
+        const auto& attempts = Harness::streamOpenAttempts;
+        Check(!attempts.empty() && attempts.front() == Harness::PluginTexturePath(),
+              std::string(test.name) + " opens the package path first");
+        Check(attempts.size() == (test.selected == 1 ? 1u : 2u),
+              std::string(test.name) + " attempts each candidate at most once");
+        if (test.selected != 1)
+            Check(attempts.size() == 2 && attempts.back() == Harness::GameTexturePath(),
+                  std::string(test.name) + " uses the absolute game path for fallback");
+        CheckTextureCleanup(test.name);
+    }
+
+    ResetTextureCase(Kind::Complete, Kind::Complete);
+    Harness::failSlotAllocation = true;
+    LoadTextures();
+    CheckTextureLoadResult("slot allocation failure", "");
+    CheckTextureCleanup("slot allocation failure");
+
+    ResetTextureCase(Kind::Missing, Kind::Missing);
+    LoadTextures();
+    CheckTextureLoadResult("initial missing package", "");
+    Harness::files[Harness::PluginTexturePath()] = Kind::Complete;
+    LoadTextures();
+    CheckTextureLoadResult("retry after package becomes available", Harness::PluginTexturePath());
+    CheckTextureCleanup("retry after package becomes available");
+
+    ResetTextureCase(Kind::Missing, Kind::Complete);
+    LoadTextures();
+    CheckTextureLoadResult("initial manual install", Harness::GameTexturePath());
+    Harness::files[Harness::PluginTexturePath()] = Kind::Complete;
+    ReloadTextures();
+    CheckTextureLoadResult("reload prefers newly available package", Harness::PluginTexturePath());
+    CheckTextureCleanup("reload prefers newly available package");
+
+    ResetTextureCase(Kind::Complete, Kind::Complete);
+    LoadTextures();
+    Harness::files.clear();
+    ReloadTextures();
+    CheckTextureLoadResult("reload after files disappear", "");
+    CheckTextureCleanup("reload after files disappear");
+
+    const std::string oldPluginDirectory = Harness::pluginDirectory;
+    Harness::pluginDirectory = "D:\\Mods With Spaces\\Renamed Controls Pack";
+    ResetTextureCase(Kind::Complete, Kind::Vanilla);
+    LoadTextures();
+    CheckTextureLoadResult("relocated package", Harness::PluginTexturePath());
+    CheckTextureCleanup("relocated package");
+    Harness::pluginDirectory = Harness::gameDirectory;
+    ResetTextureCase(Kind::Missing, Kind::Missing);
+    LoadTextures();
+    CheckTextureLoadResult("shared plugin and game directory", "");
+    Check(Harness::streamOpenAttempts.size() == 1,
+          "shared plugin and game directory attempts the same missing file only once");
+    CheckTextureCleanup("shared plugin and game directory");
+    for (char& ch : Harness::pluginDirectory)
+        if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+    ResetTextureCase(Kind::Missing, Kind::Missing);
+    LoadTextures();
+    CheckTextureLoadResult("same directory with different casing", "");
+    Check(Harness::streamOpenAttempts.size() == 1,
+          "same directory with different casing attempts the missing file only once");
+    CheckTextureCleanup("same directory with different casing");
+    Harness::pluginDirectory = oldPluginDirectory;
+}
 }
 
 int main(int argc, char** argv) {
@@ -233,6 +373,8 @@ int main(int argc, char** argv) {
     g_SpriteWidths = g_ExtendedSpriteWidths;
     ParseToken_Original = OriginalParse;
     CSprite2d_Draw_Original = reinterpret_cast<CSprite2d_Draw_t>(OriginalDraw);
+    CheckTextureLoading();
+    ResetTextureCase(Harness::FileKind::Complete, Harness::FileKind::Complete);
     for (int keyboardBase : { 15, 50 }) {
         std::cout << "Sprite base " << keyboardBase << '\n';
         KEYBOARD_SPRITE_BASE = keyboardBase;
