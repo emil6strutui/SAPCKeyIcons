@@ -1,0 +1,37 @@
+# IDE state
+.idea/
+.vs/
+*.user
+*.suo
+*.VC.db
+*.opendb
+ipch/
+
+# Build outputs
+bin/
+obj/
+Debug/
+Release/
+Win32/
+x64/
+*.asi
+*.dll
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.iobj
+*.ipdb
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
