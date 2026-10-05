@@ -4,7 +4,8 @@ Replaces keyboard and mouse control names in GTA San Andreas help text with matc
 
 ## Features
 
-- Icons for 83 keyboard keys, including Backspace and right Shift, and 7 mouse inputs
+- Icons for 84 keyboard keys, including Backspace, right Shift, and Esc, and 8 mouse inputs
+- Icons in the frontend menu's navigation hints, such as `CLICK LMB / RETURN - BACK`
 - Vertically centered icons with compact in-game sizing and larger controls-menu sizing, preserving the buttons' proportions
 - Automatic support for the player's configured keyboard and mouse bindings
 - Compatibility with `GInputSA.asi`
@@ -20,7 +21,7 @@ Replaces keyboard and mouse control names in GTA San Andreas help text with matc
 
 ### With Mod Loader
 
-With Mod Loader installed, extract `PCKeyIcons.zip` into the game directory. The resulting layout is:
+`PCKeyIcons.zip` contains two icon styles: `Default` and `Alternate Black`. With Mod Loader installed, extract the `modloader` folder from one style into the game directory. The resulting layout is:
 
 ```text
 modloader/
@@ -30,12 +31,12 @@ modloader/
       pcbtns.txd
 ```
 
-Install the ASI only once. When switching to Mod Loader, remove the previous `PCKeyIcons.SA.asi` from `scripts` or any other loader directory. Restart the game after installing or updating the ASI. The standalone plugin must not be loaded alongside a 1991 ASI that already includes these button-icon hooks.
+Install the ASI only once. To change styles, replace the installed files with the other style's files. When switching to Mod Loader, remove the previous `PCKeyIcons.SA.asi` from `scripts` or any other loader directory. Restart the game after installing or updating the ASI. The standalone plugin must not be loaded alongside a 1991 ASI that already includes these button-icon hooks.
 
 ### Without Mod Loader
 
-1. Copy `PCKeyIcons.SA.asi` to the game's `scripts` directory.
-2. Copy the bundled `models/pcbtns.txd` (under `game_assets` in this repository) to `scripts/models/pcbtns.txd` beside the ASI, creating the `models` directory if needed.
+1. From one style in `PCKeyIcons.zip`, copy `modloader/PCKeyIcons/PCKeyIcons.SA.asi` to the game's `scripts` directory.
+2. Copy the same style's `modloader/PCKeyIcons/models/pcbtns.txd` to `scripts/models/pcbtns.txd` beside the ASI, creating the `models` directory if needed.
 
 ### Texture lookup and troubleshooting
 
@@ -71,18 +72,18 @@ After building Release, run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package.ps1
 ```
 
-This creates `bin/packages/PCKeyIcons.zip` from the local Release ASI and bundled TXD. It does not build the project or copy files into the game. Running it again replaces the generated archive. Use `-Configuration Debug` to package an already built Debug ASI as `PCKeyIcons-ModLoader-Debug.zip`.
+This creates `bin/packages/PCKeyIcons.zip` from the local Release ASI and both bundled TXDs. The `Default` folder uses `game_assets/models/pcbtns.txd`, and `Alternate Black` uses `game_assets/models/pcbtns-black-alternative.txd`; each style installs its TXD as `models/pcbtns.txd` beside a copy of the ASI. It does not build the project or copy files into the game. Running it again replaces the generated archive. Use `-Configuration Debug` to package an already built Debug ASI as `PCKeyIcons-Debug.zip`.
 
 ## Regression checks
 
-The standalone harness compiles the real icon implementation with stubbed game APIs and reads texture names and dimensions from the bundled TXD. It checks key mappings, token compatibility, drawing/measurement consistency, ASI-relative texture lookup priority, fallback to the game's texture dictionary, and cleanup after failed loads without launching GTA:
+The standalone harness compiles the real icon implementation with stubbed game APIs and reads texture names and dimensions from the bundled TXD. It checks key mappings, token compatibility, frontend hint conversion, drawing/measurement consistency, ASI-relative texture lookup priority, fallback to the game's texture dictionary, and cleanup after failed loads without launching GTA:
 
 ```powershell
 & 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' '.\tests\ButtonIconsRegression.vcxproj' /p:Configuration=Release /p:Platform=Win32
 & '.\bin\tests\ButtonIconsRegression.exe'
 ```
 
-The harness does not run the game or Mod Loader. In-game checks are still needed for changes affecting hooks, rendering, or installation behavior.
+To check the alternate style, pass `game_assets/models/pcbtns-black-alternative.txd` as the executable's argument. The harness does not run the game or Mod Loader. In-game checks are still needed for changes affecting hooks, rendering, or installation behavior.
 
 ## Customization
 
@@ -90,6 +91,10 @@ There is no external size configuration file. To change inline icon heights, edi
 
 The same header declares the C++ helpers available to code built into this plugin. Existing `~Knn~` keyboard and `~Mnn~` mouse token indices remain stable when new keys are added.
 
+Frontend navigation hints are converted from their GXT text. Each `KEYS - ACTION` item has its `/`-separated key names replaced only when every name is a single letter or digit, or is listed in `g_HelperKeyNames` in [source/ButtonIcons.cpp](source/ButtonIcons.cpp); otherwise, such as with translated key names, the item remains text.
+
 ## Credits
 
 Silent for GInput source-code and icon-drawing help in the original implementation.
+
+Rize ([@rizenberg44](https://github.com/rizenberg44)) for the alternate black icons.

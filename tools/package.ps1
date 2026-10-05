@@ -9,9 +9,13 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $asiPath = Join-Path $projectRoot "bin\GTA-SA\$Configuration\PCKeyIcons.SA.asi"
-$texturePath = Join-Path $projectRoot 'game_assets\models\pcbtns.txd'
+# Each variant folder installs the same ASI with its textures as models\pcbtns.txd.
+$variants = [ordered]@{
+    'Default' = Join-Path $projectRoot 'game_assets\models\pcbtns.txd'
+    'Alternate Black' = Join-Path $projectRoot 'game_assets\models\pcbtns-black-alternative.txd'
+}
 
-foreach ($inputPath in @($asiPath, $texturePath)) {
+foreach ($inputPath in @($asiPath) + @($variants.Values)) {
     if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) {
         throw "Missing package input: $inputPath. Build $Configuration before packaging."
     }
@@ -21,9 +25,9 @@ $outputDirectory = Join-Path $projectRoot 'bin\packages'
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 $outputDirectory = (Resolve-Path -LiteralPath $outputDirectory).ProviderPath
 $archiveName = if ($Configuration -eq 'Release') {
-    'PCKeyIcons-ModLoader.zip'
+    'PCKeyIcons.zip'
 } else {
-    'PCKeyIcons-ModLoader-Debug.zip'
+    'PCKeyIcons-Debug.zip'
 }
 $archivePath = Join-Path $outputDirectory $archiveName
 $stagingName = '.staging-' + [Guid]::NewGuid().ToString('N')
@@ -31,15 +35,26 @@ $stagingDirectory = Join-Path $outputDirectory $stagingName
 New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
 
 try {
-    $modDirectory = Join-Path $stagingDirectory 'modloader\PCKeyIcons'
-    $modelsDirectory = Join-Path $modDirectory 'models'
-    New-Item -ItemType Directory -Path $modelsDirectory -Force | Out-Null
-    Copy-Item -LiteralPath $asiPath -Destination (Join-Path $modDirectory 'PCKeyIcons.SA.asi')
-    Copy-Item -LiteralPath $texturePath -Destination (Join-Path $modelsDirectory 'pcbtns.txd')
-
+    # Windows PowerShell's archive helpers write '\' entry separators, which
+    # other extractors keep in file names. Name each entry with '/' instead.
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $stagedArchive = Join-Path $stagingDirectory $archiveName
-    Compress-Archive -LiteralPath (Join-Path $stagingDirectory 'modloader') `
-        -DestinationPath $stagedArchive -CompressionLevel Optimal
+    $archive = [System.IO.Compression.ZipFile]::Open($stagedArchive, 'Create')
+    try {
+        foreach ($variant in $variants.GetEnumerator()) {
+            $modDirectory = "$($variant.Key)/modloader/PCKeyIcons"
+            $entries = @(
+                @($asiPath, "$modDirectory/PCKeyIcons.SA.asi"),
+                @($variant.Value, "$modDirectory/models/pcbtns.txd")
+            )
+            foreach ($entry in $entries) {
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $archive, $entry[0], $entry[1], 'Optimal') | Out-Null
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
     Copy-Item -LiteralPath $stagedArchive -Destination $archivePath -Force
 } finally {
     $resolvedStaging = (Resolve-Path -LiteralPath $stagingDirectory).ProviderPath

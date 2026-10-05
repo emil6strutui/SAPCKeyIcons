@@ -9,6 +9,7 @@
 #include <RenderWare.h>
 #include <extensions/Paths.h>
 
+#include <algorithm>
 #include <cstring>
 #include <cstdio>
 #include <string>
@@ -46,6 +47,7 @@ static const int GINPUT_KEYBOARD_SPRITE_BASE = 50;
 static const int GINPUT_MOUSE_SPRITE_BASE = 50 + KEYBOARD_COUNT;
 
 static_assert(KEYBOARD_COUNT <= 100, "Keyboard tokens have two index digits");
+static_assert(MOUSE_COUNT <= 10, "Mouse tokens have one significant index digit");
 static_assert(GINPUT_MOUSE_SPRITE_BASE + MOUSE_COUNT <= MAX_EXTENDED_SPRITES,
               "Button sprites must fit alongside GInput sprites");
 
@@ -75,14 +77,15 @@ static const char* const g_KeyboardSpriteNames[KEYBOARD_COUNT] = {
     // Function keys F1-F12 (69-80)
     "112", "113", "114", "115", "116", "117",
     "118", "119", "120", "121", "122", "123",
-    // Backspace and right Shift (81-82)
-    "8", "161"
+    // Backspace, right Shift, and Esc (81-83)
+    "8", "161", "27"
 };
 
 static const char* const g_MouseSpriteNames[MOUSE_COUNT] = {
     "1", "2", "4",
     "MWHU", "MWHD",
-    "5", "6"
+    "5", "6",
+    "MWH"
 };
 
 // ============================================================================
@@ -98,7 +101,7 @@ static int g_TxdSlot = -1;
 // ============================================================================
 
 enum RsKeyCodes : int {
-    rsNULL = 1056,
+    rsNULL = 1056, rsESC = 1000,
     rsUP = 1019, rsDOWN = 1020, rsLEFT = 1021, rsRIGHT = 1022,
     rsPADINS = 1038, rsPADEND = 1028, rsPADDOWN = 1029, rsPADPGDN = 1030,
     rsPADLEFT = 1031, rsPAD5 = 1032, rsPADRIGHT = 1034,
@@ -335,6 +338,7 @@ static const char* GetSpriteTokenForKeyCode(unsigned int keyCode) {
         case rsINS:      return "~K68~";
         case rsBACKSP:   return "~K81~";
         case rsRSHIFT:   return "~K82~";
+        case rsESC:      return "~K83~";
         default: return nullptr;
     }
 }
@@ -563,6 +567,98 @@ __declspec(naked) void GetControllerSettingTextMouse_Thunk() {
 }
 
 // ============================================================================
+// CMenuManager::DisplayHelperText TEXT (0x57E240)
+// ============================================================================
+
+// Frontend navigation keys are fixed, so helper text names them directly, as in
+// "CLICK LMB / RETURN - BACK". Single-letter names use the keyboard mapping.
+struct HelperKeyName {
+    const char* name;
+    const char* tokens;
+};
+
+static const HelperKeyName g_HelperKeyNames[] = {
+    { "CLICK LMB", "~M00~" }, { "LMB", "~M00~" },
+    { "CLICK RMB", "~M01~" }, { "RMB", "~M01~" },
+    { "MOUSEWHEEL", "~M07~" }, { "MSWHEEL", "~M07~" },
+    { "RETURN", "~K53~" }, { "BACKSPACE", "~K81~" }, { "ESC", "~K83~" },
+    { "SPACEBAR", "~K45~" }, { "PGUP", "~K51~" }, { "PGDN", "~K52~" },
+    { "LEFT", "~K06~" }, { "RIGHT", "~K07~" },
+    { "CURSORS", "~K04~~K05~~K06~~K07~" },
+};
+
+static const char* GetHelperKeyTokens(const char* name, size_t length) {
+    if (length == 1) return GetSpriteTokenForKeyCode(static_cast<unsigned char>(name[0]));
+    for (const HelperKeyName& key : g_HelperKeyNames) {
+        if (strlen(key.name) == length && _strnicmp(key.name, name, length) == 0) return key.tokens;
+    }
+    return nullptr;
+}
+
+static std::string g_HelperText;
+
+// Replace an item's '/'-separated key list only when every name has an icon,
+// so translated or unknown names never leave a half-converted list.
+static void AppendHelperItem(const char* item, const char* end) {
+    static const char separator[] = " - ";
+    const char* action = std::search(item, end, separator, separator + 3);
+    if (action != end) {
+        std::string keys;
+        for (const char* name = item;;) {
+            const char* nameEnd = std::find(name, action, '/');
+            const char* first = name;
+            const char* last = nameEnd;
+            while (first != last && *first == ' ') ++first;
+            while (last != first && last[-1] == ' ') --last;
+            const char* tokens = GetHelperKeyTokens(first, static_cast<size_t>(last - first));
+            if (!tokens) break;
+            keys.append(name, first).append(tokens).append(last, nameEnd);
+            if (nameEnd == action) {
+                g_HelperText.append(keys).append(action, end);
+                return;
+            }
+            keys += '/';
+            name = nameEnd + 1;
+        }
+    }
+    g_HelperText.append(item, end);
+}
+
+// Helper lines are separated by "~n~", and items within a line by " , ".
+static const char* FindHelperItemEnd(const char* text, size_t& separatorLength) {
+    for (; *text; ++text) {
+        if (_strnicmp(text, "~n~", 3) == 0 || strncmp(text, " , ", 3) == 0) {
+            separatorLength = 3;
+            return text;
+        }
+    }
+    separatorLength = 0;
+    return text;
+}
+
+static char* ReplaceHelperKeyNames(char* text) {
+    if (!text || !g_Enabled || !g_TexturesLoaded) return text;
+
+    g_HelperText.clear();
+    for (const char* item = text;;) {
+        size_t separatorLength;
+        const char* end = FindHelperItemEnd(item, separatorLength);
+        AppendHelperItem(item, end);
+        if (separatorLength == 0) break;
+        g_HelperText.append(end, separatorLength);
+        item = end + separatorLength;
+    }
+    return g_HelperText.data();
+}
+
+using TextGet_t = char*(__thiscall*)(void*, const char*);
+static TextGet_t HelperText_Get_Original = reinterpret_cast<TextGet_t>(0x6A0050);
+
+static char* __fastcall HelperText_Get_Hook(void* text, void*, const char* key) {
+    return ReplaceHelperKeyNames(HelperText_Get_Original(text, key));
+}
+
+// ============================================================================
 // ParseToken HOOK
 // ============================================================================
 
@@ -602,7 +698,7 @@ char* __cdecl ParseToken_Hooked(char* text, CRGBA& color, bool isBlip, char* tag
 
     if (text[0] == '~' && text[1] == 'M' && text[4] == '~') {
         char d1 = text[2], d2 = text[3];
-        if (d1 == '0' && d2 >= '0' && d2 <= '6') {
+        if (d1 == '0' && d2 >= '0' && d2 < '0' + MOUSE_COUNT) {
             int spriteIdx = MOUSE_SPRITE_BASE + (d2 - '0');
             if (spriteIdx >= 0 && spriteIdx < MAX_EXTENDED_SPRITES) {
                 *g_PS2Symbol = static_cast<uint8_t>(spriteIdx);
@@ -736,6 +832,25 @@ void __declspec(naked) TokenWidthHook() {
 
 static bool g_HooksInstalled = false;
 
+static void InstallHelperTextHooks() {
+    // DisplayHelperText fetches its key-argument, status, and menu-entry texts
+    // through these calls. Chain an earlier redirect, but leave the function
+    // untouched if another plugin has already split or replaced its calls.
+    const uintptr_t calls[] = { 0x57E2A5, 0x57E37A, 0x57E44E };
+    uintptr_t destination = 0;
+    for (uintptr_t call : calls) {
+        if (*reinterpret_cast<uint8_t*>(call) != 0xE8) return;
+        const uintptr_t target = call + 5 + *reinterpret_cast<int32_t*>(call + 1);
+        if (destination && target != destination) return;
+        destination = target;
+    }
+
+    HelperText_Get_Original = reinterpret_cast<TextGet_t>(destination);
+    for (uintptr_t call : calls) {
+        patch::RedirectCall(call, HelperText_Get_Hook);
+    }
+}
+
 static void InstallGInputCompatibleHooks() {
     if (g_HooksInstalled) return;
     g_HooksInstalled = true;
@@ -790,6 +905,8 @@ static void InstallGInputCompatibleHooks() {
 
     patch::RedirectCall(0x71A336, TokenWidthHook);
     patch::RedirectCall(0x718AE5, ButtonSprite_Draw_Hook);
+
+    InstallHelperTextHooks();
 }
 
 void InstallHooks() {

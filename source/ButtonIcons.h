@@ -11,7 +11,7 @@ constexpr float MENU_ICON_SIZE = 17.0f;
 
 // ============================================================================
 // KEYBOARD KEY INDICES
-// Keyboard token indices (83 keys)
+// Keyboard token indices (84 keys)
 // ============================================================================
 
 enum KeyboardKey {
@@ -61,9 +61,9 @@ enum KeyboardKey {
     KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
 
     // Append new keys so existing ~K00~ through ~K80~ tokens stay compatible.
-    KEY_BACKSPACE, KEY_RSHIFT,
+    KEY_BACKSPACE, KEY_RSHIFT, KEY_ESC,
 
-    KEYBOARD_COUNT  // = 83
+    KEYBOARD_COUNT  // = 84
 };
 
 // ============================================================================
@@ -79,7 +79,8 @@ enum MouseButton : int {
     MOUSE_WHEEL_DOWN = 4,
     MOUSE_BUTTON_4 = 5,
     MOUSE_BUTTON_5 = 6,
-    MOUSE_COUNT = 7
+    MOUSE_WHEEL = 7,  // Either wheel direction, as named by menu helper text
+    MOUSE_COUNT = 8
 };
 
 // ============================================================================

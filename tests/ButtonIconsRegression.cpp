@@ -59,6 +59,10 @@ char* __cdecl OriginalParse(char* text, CRGBA&, bool, char*) {
 void __fastcall OriginalDraw(CSprite2d*, void*, const CRect& rect, const CRGBA& color) {
     Harness::CaptureDraw(rect, color);
 }
+// Stand in for CText::Get: helper-text tests pass the GXT text as the key.
+char* __fastcall OriginalTextGet(void*, void*, const char* key) {
+    return const_cast<char*>(key);
+}
 
 void CheckKeyMapping(unsigned int keyCode, int expectedIndex, const char* textureName,
                      unsigned char* controller) {
@@ -123,9 +127,9 @@ void CheckGeometry(float& fontScale, bool menuActive) {
     const float expectedSize = menuActive ? 17.0f : 13.0f;
     struct Sample { char kind; int key; };
     for (const Sample sample : { Sample{'K', KEY_UP}, {'K', KEY_SPACE}, {'K', KEY_LSHIFT},
-                                {'K', 81}, {'K', 82}, {'M', 0}, {'M', 3}, {'M', 6} }) {
+                                {'K', 81}, {'K', 82}, {'K', 83}, {'M', 0}, {'M', 3}, {'M', 6}, {'M', 7} }) {
         // Before the fix, the new mapping checks already report missing keys.
-        if (sample.kind == 'K' && sample.key >= KEYBOARD_COUNT) continue;
+        if (sample.key >= (sample.kind == 'K' ? KEYBOARD_COUNT : MOUSE_COUNT)) continue;
         const int spriteIndex = (sample.kind == 'K' ? KEYBOARD_SPRITE_BASE : MOUSE_SPRITE_BASE) + sample.key;
         auto raster = RwTextureGetRaster(g_SpriteArray[spriteIndex].m_pTexture);
         const float aspect = static_cast<float>(raster->width) / raster->height;
@@ -211,6 +215,61 @@ void CheckDirectDrawing() {
           Harness::drawnColor.b == 60 && Harness::drawnColor.a == 80, "direct drawing retains color");
 }
 
+void CheckHelperText() {
+    using namespace ButtonIcons;
+    HelperText_Get_Original = reinterpret_cast<TextGet_t>(OriginalTextGet);
+    struct Sample { const char* text; const char* expected; };
+    // Texts are the 1.0 US american.gxt entries that DisplayHelperText shows.
+    const Sample samples[] = {
+        {"CLICK LMB / RETURN - ENTER MENU", "~M00~ / ~K53~ - ENTER MENU"},             // FEH_JMP
+        {"CLICK LMB / RETURN - BACK", "~M00~ / ~K53~ - BACK"},                         // FEH_BPO
+        {"CLICK LMB / RETURN - SCAN USER TRACKS", "~M00~ / ~K53~ - SCAN USER TRACKS"}, // FEH_SNC
+        {"CLICK LMB / RETURN - APPLY NEW SETTING", "~M00~ / ~K53~ - APPLY NEW SETTING"}, // FET_APP
+        {"BACKSPACE - CLEAR~n~CLICK LMB / RETURN - CHANGE",
+         "~K81~ - CLEAR~n~~M00~ / ~K53~ - CHANGE"},                                   // FET_CIG
+        {"SELECT A NEW CONTROL FOR THIS ACTION~n~ESC - CANCEL",
+         "SELECT A NEW CONTROL FOR THIS ACTION~n~~K83~ - CANCEL"},                    // FET_RIG
+        {"LEFT / RIGHT / MOUSEWHEEL - ADJUST", "~K06~ / ~K07~ / ~M07~ - ADJUST"},      // FET_MIG
+        {"CURSORS - MOVE~n~S - SAVE TO FILE",
+         "~K04~~K05~~K06~~K07~ - MOVE~n~~K02~ - SAVE TO FILE"},                      // FEH_SSA
+        {"CURSORS - MOVE UP/DOWN~n~RETURN - TOGGLE OPTION",
+         "~K04~~K05~~K06~~K07~ - MOVE UP/DOWN~n~~K53~ - TOGGLE OPTION"},             // FEH_MPB
+        {"LMB/CURSORS - SCROLL~n~PGUP/PGDN/MSWHEEL - ZOOM~n~Z - OVERVIEW , L - LEGEND~n~"
+         "RMB/T - TARGET , SPACEBAR - BLIPS MENU~n~ESC - BACK",
+         "~M00~/~K04~~K05~~K06~~K07~ - SCROLL~n~~K51~/~K52~/~M07~ - ZOOM~n~~K16~ - OVERVIEW , "
+         "~K23~ - LEGEND~n~~M01~/~K28~ - TARGET , ~K45~ - BLIPS MENU~n~~K83~ - BACK"},  // FEH_MPH
+        {"USER TRACKS SCANNED SUCCESSFULLY", "USER TRACKS SCANNED SUCCESSFULLY"},      // FEA_SCS
+        {"STATS SAVED TO 'STATS.HTML'", "STATS SAVED TO 'STATS.HTML'"},                // FET_STS
+        {"ESC - BACK~N~RETURN - SELECT", "~K83~ - BACK~N~~K53~ - SELECT"},
+        // Translated or unknown names remain text, even beside known names.
+        {"CLIC GAUCHE / ENTREE - RETOUR", "CLIC GAUCHE / ENTREE - RETOUR"},
+        {"LMB / ENTER - BACK~n~ESC - CANCEL", "LMB / ENTER - BACK~n~~K83~ - CANCEL"},
+        {"LMB/ - BACK", "LMB/ - BACK"},
+        {"PRESS ESC TO CANCEL", "PRESS ESC TO CANCEL"},
+        {"", ""}
+    };
+    CRGBA color;
+    for (const Sample& sample : samples) {
+        const char* result = HelperText_Get_Hook(nullptr, nullptr, sample.text);
+        Check(result && std::strcmp(result, sample.expected) == 0,
+              std::string("helper text \"") + sample.text + "\" becomes \"" + sample.expected + '"');
+        for (const char* token = result; token && (token = std::strchr(token, '~')) != nullptr; ++token) {
+            if (token[1] != 'K' && token[1] != 'M') continue;
+            char copy[6]{};
+            std::memcpy(copy, token, 5);
+            Check(ParseToken_Hooked(copy, color, false, nullptr) == copy + 5 &&
+                  g_SpriteArray[*g_PS2Symbol].m_pTexture != nullptr,
+                  std::string("helper token ") + copy + " selects a loaded icon");
+            token += 4;
+        }
+    }
+    char text[] = "CLICK LMB / RETURN - BACK";
+    SetEnabled(false);
+    Check(HelperText_Get_Hook(nullptr, nullptr, text) == text, "disabled icons keep helper text");
+    SetEnabled(true);
+    Check(HelperText_Get_Hook(nullptr, nullptr, nullptr) == nullptr, "missing helper text stays missing");
+}
+
 void ResetTextureCase(Harness::FileKind packaged, Harness::FileKind game) {
     using namespace ButtonIcons;
     UnloadTextures();
@@ -248,6 +307,9 @@ void CheckTextureLoadResult(const std::string& label, const std::string& expecte
         CRGBA color;
         Check(ParseToken_Hooked(token, color, false, nullptr) == token + 3,
               label + " keeps text fallback active when icons are unavailable");
+        char helper[] = "CLICK LMB / RETURN - BACK";
+        Check(ReplaceHelperKeyNames(helper) == helper,
+              label + " keeps helper text when icons are unavailable");
     }
 }
 
@@ -384,7 +446,15 @@ int main(int argc, char** argv) {
         Check(g_TexturesLoaded, "textures loaded");
         CheckKeyMapping(1042, 81, "8", controller);
         CheckKeyMapping(1047, 82, "161", controller);
+        CheckKeyMapping(1000, 83, "27", controller);
         CheckExistingTokens();
+        char wheelToken[] = "~M07~";
+        CRGBA wheelColor;
+        Check(ParseToken_Hooked(wheelToken, wheelColor, true, nullptr) == wheelToken + 5 &&
+              *g_PS2Symbol == MOUSE_SPRITE_BASE + MOUSE_WHEEL &&
+              g_SpriteArray[*g_PS2Symbol].m_pTexture == &Harness::textures.at("MWH"),
+              "~M07~ selects the mouse wheel texture");
+        CheckHelperText();
         // Enter and leave the controls menu without reloading textures: size
         // changes must follow the context immediately and must not leak back.
         for (bool menuActive : { false, true, false }) {
